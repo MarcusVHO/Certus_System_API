@@ -2,6 +2,7 @@ import express from "express"
 import cors from "cors"
 import connection from "./database/database.js"
 import usersRoutes from "./routes/usersRoutes.js"
+import pmdRoutes from "./routes/pmdRoutes.js"
 console.log("Starting Server .....")
 
 //configs do express
@@ -17,5 +18,7 @@ app.get("/status", (req, res) => {
 
 //Rotas da api
 app.use("/users", usersRoutes)
+
+app.use("/pmd", pmdRoutes)
 
 app.listen(3000)

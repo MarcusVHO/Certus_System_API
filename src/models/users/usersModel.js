@@ -64,3 +64,9 @@ export async function getRefreshToken(id) {
 }
 
 
+export async function removeRefreshToken(id) {
+  const resposta = await connection.query(
+    "UPDATE users SET refresh_token = '' WHERE id = ?", [id]
+  )
+  return resposta
+}
