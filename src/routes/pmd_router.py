@@ -33,6 +33,7 @@ async def get_programacao(data: get_new_programacao):
     except HTTPException:
         raise
     except Exception as e:
+        
         raise HTTPException(status_code=500, detail=f"Erro interno: {e}")
     
 
@@ -46,12 +47,13 @@ async def add_new_programtion(xlsx_file: UploadFile):
     except HTTPException:
         raise
     except Exception as e:
+         print(e)
          raise HTTPException(status_code=500, detail=f"Erro interno: {e}")
     
 @router.post("/get_programacao_data")
 async def get_programacao_data(data: get_prog_data_model):
     try:
-        response = await get_programacao_data_core(data.id)
+        response = await get_programacao_data_core(data.id, data.type)
         return response
     except HTTPException:
         raise

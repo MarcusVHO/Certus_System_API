@@ -1,10 +1,8 @@
 from datetime import timedelta
-from dotenv import load_dotenv
 from fastapi import HTTPException
-import mysql
-import mysql.connector
 import pandas as pd
-import os
+
+from src.db.database import get_connection
 
 async def gerarProgram(arquivo):
     try:
@@ -24,7 +22,6 @@ async def gerarProgram(arquivo):
         colunasFiltradasSts = tabela[[("STS", "Batch/Mist."), ("STS", "OP")]]
 
         seq = 0
-        ordem = 0
         horario = timedelta(hours=6, minutes=20)
         blocos = [[], [], [], []]  
         blocoAtual = []
@@ -34,12 +31,11 @@ async def gerarProgram(arquivo):
         # Itera sobre as linhas do DataFrame
         for index, item in colunasFiltradasNormal.iterrows():
             if item["Normal"][0] == 0:
-                print("item ignorado")
+                # print("item ignorado")
                 if blocoAtual:
-                    print(f"{len(blocoAtual)} adicionado na bosicao {posicao_bloco}")
+                    # print(f"{len(blocoAtual)} adicionado na bosicao {posicao_bloco}")
                     blocos.insert(posicao_bloco, blocoAtual)
                     blocoAtual = []
-                    ordem = 0
                     antecipa = 1
                     posicao_bloco = 1
             else:
@@ -50,12 +46,11 @@ async def gerarProgram(arquivo):
                 op = int(item["OP"][0])
                 horario = horario + timedelta(minutes=30)
                 hora_str = f"{horario.seconds//3600:02d}:{(horario.seconds%3600)//60:02d}"
-                ordem += 1
                 
 
-                blocoAtual.append((seq, batch, mist, ordem, hora_str, op, antecipa))
+                blocoAtual.append((seq, batch, mist, hora_str, op, antecipa))
 
-                print(f"SEQ: {seq}, BATCH: {batch}, MIST: {mist}, ORDEM: {ordem}, HORARIO:{horario}, OP: {op}, ANTECIPA: {antecipa}")
+                # print(f"SEQ: {seq}, BATCH: {batch}, MIST: {mist}, HORARIO:{horario}, OP: {op}, ANTECIPA: {antecipa}")
 
    
         horario = timedelta(hours=5, minutes=20)
@@ -64,14 +59,13 @@ async def gerarProgram(arquivo):
         for idex, item in colunasFiltradasSts.iterrows():
 
             if pd.isna(item.iloc[1]):
-                print("sts ignorado")
+                # print("sts ignorado")
                 
                 #reseta adicona a lista de blocos e resta blocoatual
                 if blocoAtual:
-                    print(f"{len(blocoAtual)} adicionado na bosicao {posicao_bloco}")
+                    # print(f"{len(blocoAtual)} adicionado na bosicao {posicao_bloco}")
                     blocos.insert(posicao_bloco, blocoAtual)
                     blocoAtual = []
-                    ordem = 0
                     antecipa = 1
                     posicao_bloco = 3
 
@@ -84,11 +78,10 @@ async def gerarProgram(arquivo):
                 op = int(item.iloc[1])
                 horario = horario + timedelta(minutes=30)
                 hora_str = f"{horario.seconds//3600:02d}:{(horario.seconds%3600)//60:02d}"
-                ordem += 1
 
                 #adiciona item ao bloco atula
-                blocoAtual.append((seq, batch, mist, ordem, hora_str, op, antecipa))
-                print(f"STS SEQ: {seq}, BATCH: {batch}, MIST: {mist}, ORDEM: {ordem}, HORARIO:{horario}, OP: {op}, ANTECIPA: {antecipa}")
+                blocoAtual.append((seq, batch, mist, hora_str, op, antecipa))
+                # print(f"STS SEQ: {seq}, BATCH: {batch}, MIST: {mist}, HORARIO:{horario}, OP: {op}, ANTECIPA: {antecipa}")
                 
 
 
@@ -111,68 +104,54 @@ async def gerarProgram(arquivo):
 
 
 async def inserirProgramacaoDb(data, normais, normaisAntecipa, sts, stsAntecipa):
-    load_dotenv()
     
-    user = os.getenv("DB_USER")
-    password = os.getenv("DB_PASS")
-    host = os.getenv("DB_HOST")
-    database = "CERTUS"
+    conn = get_connection()
+    data = pd.to_datetime(data).date()
 
-    conn = mysql.connector.connect(
-        host=host,
-        user=user,
-        password=password,
-        database=database
-    )
+    try:
+        with conn.cursor() as cursor: 
+            
+            #verifica se dia existe antes de inserir
+            cursor.execute(
+                "SELECT * FROM programDays WHERE data = (%s);", (data,)
+            )
 
-    cursor = conn.cursor(buffered=True)
+            if cursor.fetchone() is None:
 
-    #verifica se dia existe antes de inserir
-    cursor.execute(
-        "SELECT * FROM programDays WHERE data = (%s);", (data,)
-    )
+                cursor.execute(
+                    "INSERT INTO programDays (data) VALUES (%s);",(data,)
+                )
+                conn.commit()
 
-    if cursor.fetchone() is None:
+                cursor.execute(
+                    "SELECT id FROM programDays WHERE data = (%s)",(data,)
+                )
+                
+                
+                id = cursor.fetchone()["id"]
+                print(id)
 
-        cursor.execute(
-            "INSERT INTO programDays (data) VALUES (%s);",(data,)
-        )
-        conn.commit()
+                normais = normais + normaisAntecipa 
+                normais = [t + (id,) for t in normais]
+                sts = sts + stsAntecipa
+                sts = [t + (id,) for t in sts]
 
-        cursor.execute(
-            "SELECT id FROM programDays WHERE data = %s",(data,)
-        )
+                if normais:
+                    cursor.executemany(
+                        "INSERT IGNORE INTO itens_normais (seq, batch, mist, horario, op, antecipado, dia_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",normais
+                    )
+                
+                if sts:
+                    cursor.executemany(
+                        "INSERT IGNORE INTO itens_sts (seq, batch, mist, horario, op, antecipado, dia_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",sts
+                    )
+                    conn.commit()
 
-        id = cursor.fetchone()[0]
+    
+            else:
+                print("Programação já existe")
+                raise HTTPException(status_code=422, detail="Programação já existe!!!")
 
+    finally:
+        conn.close()
 
-        normais = normais + normaisAntecipa 
-        normais = [t + (id,) for t in normais]
-        sts = sts + stsAntecipa
-        sts = [t + (id,) for t in sts]
-
-        cursor.executemany(
-            "INSERT IGNORE INTO itens_normais (seq, batch, mist, ordem, horario, op, antecipado, dia_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",normais
-        )
-        conn.commit()
-
-        cursor.executemany(
-            "INSERT IGNORE INTO itens_sts (seq, batch, mist, ordem, horario, op, antecipado, dia_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",sts
-        )
-        conn.commit()
-        
-        conn.commit()
-        cursor.close()
-
-        print(normais)
-    else:
-        print("Programação já existe")
-        raise HTTPException(status_code=422, detail="Programação já existe!!!")
-
-
-if __name__ == "__main__":
-    BASE_DIR = os.path.dirname(__file__)  # pasta onde está o main.py
-    file_path = os.path.join(BASE_DIR, "xlsx", "Programação PMD 15-09-2025.xlsx")
-
-    data, normais, normaisAntecipa, sts, stsAntecipa = gerarProgram(file_path)
-    inserirProgramacaoDb(data, normais, normaisAntecipa, sts, stsAntecipa)

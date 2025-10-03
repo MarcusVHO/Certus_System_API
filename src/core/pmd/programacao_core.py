@@ -2,8 +2,8 @@
 # ---------------- Imports Externos ----------------
 from fastapi import Path
 # ---------------- Imports Externos ----------------
-# ---------------- Imports Internos ----------------
 
+# ---------------- Imports Internos ----------------
 from src.services.pmd.programacao_service import get_list_programacoes, get_programacao_data_in_db
 from src.utils.gerarProgram import gerarProgram, inserirProgramacaoDb
 # ---------------- Imports Internos ----------------
